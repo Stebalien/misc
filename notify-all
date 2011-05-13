@@ -1,0 +1,50 @@
+#!/usr/bin/python2
+
+import dbus
+import sys
+import os
+import argparse
+from subprocess import Popen as run
+from pwd import getpwnam
+
+parser = argparse.ArgumentParser(description='Notify users.')
+user_or_all = parser.add_mutually_exclusive_group()
+user_or_all.add_argument('--user', '-u', dest='users', metavar='USER', type=str, nargs=1,
+                         action='append',
+                         help='Notify a different user (requires root).')
+user_or_all.add_argument('--all-sessions', '-a', dest='all', action='store_true',
+                         help='Notify the currently active session.')
+user_or_all.add_argument('--everyone', '-e', dest='everyone', action='store_true',
+                         help='Notify all users.')
+parser.add_argument("summery", type=str, metavar='SUMMERY', nargs=1)
+parser.add_argument("description", type=str, metavar='DESCRIPTION', nargs='?')
+
+args = parser.parse_args()
+
+system_bus = dbus.SystemBus()
+
+ck = dbus.Interface(
+    system_bus.get_object('org.freedesktop.ConsoleKit', '/org/freedesktop/ConsoleKit/Manager'),
+    dbus_interface='org.freedesktop.ConsoleKit.Manager'
+)
+
+if args.everyone:
+    sessions = ck.GetSessions()
+else:
+    sessions = ck.GetSessionsForUnixUser(os.geteuid())
+
+for path in sessions:
+    s = dbus.Interface(system_bus.get_object('org.freedesktop.ConsoleKit', path),
+                       dbus_interface='org.freedesktop.ConsoleKit.Session')
+    if not (args.all or s.IsActive()): continue
+
+    display = s.GetX11Display()
+    if display:
+        os.environ["DISPLAY"] = display
+        dbus.Interface(
+            dbus.SessionBus().get_object('org.freedesktop.Notifications', '/'),
+            dbus_interface='org.freedesktop.Notifications'
+        ).Notify("notify-all", 0, "", args.summery[0], args.description or "", [], {}, 5000)
+    else:
+        tty = s.GetDisplayDevice()
+        run(["/usr/bin/tmux", "display-message", '-t', tty, args.summery[0] + (": " + args.description if args.description else "")])

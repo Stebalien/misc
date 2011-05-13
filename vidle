@@ -1,0 +1,62 @@
+#!/bin/bash
+PYTHON="ipython${0##*vidle}"
+f5="map <F5> :wa<CR>:!$0 -l %<CR><CR>"
+f4="vmap <F4> :!$0 -s %s<CR><CR>"
+ft="set filetype=python"
+
+
+if [ -z "$TMUX" ]; then
+    if [ "${-/i/}" == "$-" -a "$TERM" != "rxvt-unicode-256color" ]; then
+        exec urxvtc -title "IPython" -e $0 $@
+    elif ! tmux has-session -t $PYTHON; then
+        tmux new-session -ds $PYTHON -n shell $PYTHON
+        tmux new-window -t $PYTHON:2 -n "vim" "gvim --servername $PYTHON-vim -c \"$f5\" -c \"$f4\" -c \"$ft\" -p $@"
+        tmux set-option -t $PYTHON status off
+        tmux select-window -t shell
+        exec tmux attach -t $PYTHON
+    else
+        if ! gvim --servername "$PYTHON-vim" --remote-tab-silent $@; then
+            tmux new-window -t $PYTHON:2 -n "vim" "gvim --servername $PYTHON-vim -c \"$f5\" -c \"$f4\" -c \"$ft\" -p $@"
+        fi
+        exit
+    fi
+fi
+
+
+select_ipython() {
+    if [ -n "$MYGVIMRC" ]; then
+        if ! tmux select-window -t $PYTHON; then
+            tmux new-window -n $PYTHON $PYTHON
+        fi
+    else
+        if ! tmux list-panes|grep "^1: " 2>&1 >/dev/null ; then
+            tmux split -h $PYTHON
+            sleep 2
+        fi
+        tmux select-pane -t 1
+        if tmux has-session -t $PYTHON; then
+            tmux send-keys
+        fi
+    fi
+}
+
+case "$1" in
+    -v)
+        select_ipython
+        exit 0
+        ;;
+    -l)
+        select_ipython
+        tmux send-keys "execfile(\"$2\")"
+        exit 0
+        ;;
+    -s)
+        select_ipython
+        input=`sponge`
+        tmux send-keys "$input"
+        echo "$input"
+        ;;
+    *)
+        exec vim -c "$f5" -c "$f4" -c "$ft" -p $@
+        ;;
+esac

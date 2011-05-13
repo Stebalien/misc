@@ -1,0 +1,57 @@
+#!/bin/zsh
+export nb="#111111"
+export nf="#aaaaaa"
+export sf="#afd700"
+export sb="#222222"
+
+DMENU_OPTIONS=(-b -i -nb $nb -nf $nf -sf $sf -sb $sb)
+case $1 in
+    run)
+        dmenu_run $DMENU_OPTIONS -l 10
+        ;;
+    moc)
+        moc_parse() {
+            cat | awk '
+BEGIN {
+    FS=","
+    dmenu="dmenu -l 10 -b -i -nb \"" ENVIRON["nb"] "\" -nf \"" ENVIRON["nf"] "\" -sf \"" ENVIRON["sf"] "\" -sb \"" ENVIRON["sb"] "\""
+}
+
+/^#EXTINF/ {
+    sub(/.$/, "", $2)
+    title=$2
+    print title |& dmenu
+}
+
+/^\// {
+    sub(/.$/, "", $0)
+    playlist[title]=$0
+}
+
+END {
+    close(dmenu, "to")
+    dmenu |& getline
+    close(dmenu)
+    print playlist[$0]
+}
+'
+        }
+        file="$(cat ~/.moc/playlist.m3u | moc_parse)"
+        exec mocp -l "$file"
+    ;;
+    launch)
+        DMENU_OPTIONS="${DMENU_OPTIONS[*]} -l 10"
+        export DMENU_OPTIONS
+        exec dmenu-launch
+        ;;
+    run-awesome)
+        if ! test -d "$XDG_CACHE_HOME/awesome"; then
+            mkdir -p "$XDG_CACHE_HOME/awesome"
+            touch "$XDG_CACHE_HOME/awesome/history"
+        fi
+        cmd=$({ tac $XDG_CACHE_HOME/awesome/history | awk '!arr[$0]++'; dmenu_path; } | dmenu $DMENU_OPTIONS)
+        [[ -z "$cmd" ]] && exit
+        echo $cmd >> "$XDG_CACHE_HOME/awesome/history"
+        exec eval $cmd
+        ;;
+esac

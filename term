@@ -1,0 +1,17 @@
+#!/bin/dash
+session="$(tmux ls|sed -ne '1,/[^)]$/ s/\(.*\): .*[^)]$/a -t \1/p')"
+e_def="-e tmux $session"
+t_def="-title Terminal"
+for arg in $@; do
+    case $arg in
+        '-e')
+            e_def=""
+            ;;
+        '-title')
+            t_def=""
+            ;;
+    esac
+done
+urxvtc $t_def $@ $e_def
+[ $? -eq 2 ] && urxvtd -q -o -f && urxvtc $t_def $@ $e_def
+exit 0
