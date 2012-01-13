@@ -1,0 +1,8 @@
+#!/bin/bash
+TZ=$(tzselect)
+if [ -n "$TZ" ]; then
+    cp -f /usr/share/zoneinfo/$TZ /etc/localtime
+    hwclock -s
+fi
+
+

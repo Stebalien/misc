@@ -39,6 +39,9 @@ END {
         file="$(cat ~/.moc/playlist.m3u | moc_parse)"
         exec mocp -l "$file"
     ;;
+    mpd)
+        exec mpc play $(sed -n "s@^ *\([0-9]\+\);$(mpc playlist|dmenu $DMENU_OPTIONS -l 10 -p 'song name'||echo ";;;")@\1@p" < <(mpc playlist|nl -s ';'))
+        ;;
     launch)
         DMENU_OPTIONS="${DMENU_OPTIONS[*]} -l 10"
         export DMENU_OPTIONS
@@ -49,7 +52,11 @@ END {
             mkdir -p "$XDG_CACHE_HOME/awesome"
             touch "$XDG_CACHE_HOME/awesome/history"
         fi
-        cmd=$({ tac $XDG_CACHE_HOME/awesome/history | awk '!arr[$0]++'; dmenu_path; } | dmenu $DMENU_OPTIONS)
+        CACHE=${XDG_CACHE_HOME:-"$HOME/.cache"}/dmenu_run
+        if test "`ls -dt $path "$CACHE" 2> /dev/null | sed 1q`" != "$CACHE"; then
+            mkdir -p "`dirname "$CACHE"`" && lsx $path| sort -ur > "$CACHE"
+        fi
+        cmd=$(tac $XDG_CACHE_HOME/awesome/history "$CACHE" | dmenu $DMENU_OPTIONS)
         [[ -z "$cmd" ]] && exit
         echo $cmd >> "$XDG_CACHE_HOME/awesome/history"
         exec eval $cmd

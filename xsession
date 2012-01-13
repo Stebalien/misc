@@ -1,16 +1,6 @@
 #!/bin/bash
 xlogout() {
-        source "$HOME/.xlogoutrc"
-        for sig in INT TERM KILL; do
-            killall -SIG$sig -ew ${AUTOKILL[@]}
-
-            trap "echo Timout..." INT
-            ( sleep 5; kill -SIGINT $$ ) & kill_pid=$!; disown $!
-            if wait; then
-                kill -SIGTERM $kill_pid
-                break
-            fi
-        done
+    source "$HOME/.xlogoutrc"
 }
 
 case $1 in

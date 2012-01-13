@@ -23,6 +23,7 @@ from glob import glob
 
 class SavePlugin(PithosPlugin):
     preference = 'save'
+    _MUSIC_DIR = os.getenv("XDG_MUSIC_DIR")
 
     def on_enable(self):
         self.song_rating_changed_handle = self.window.connect('song-rating-changed', self.song_rating_changed)
@@ -33,8 +34,7 @@ class SavePlugin(PithosPlugin):
             if not tmp_files:
                 return
             src_file = tmp_files[-1]
-            BASE="/home/steb/Media/Music"
-            path = os.path.join(BASE, song.artist, song.album)
+            path = os.path.join(SavePlugin._MUSIC_DIR, song.artist, song.album)
             filename = "%s.m4a" % song.title
             fullpath = os.path.join(path, filename)
             if os.path.exists(fullpath):

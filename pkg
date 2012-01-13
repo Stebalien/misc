@@ -60,6 +60,11 @@ case $1 in
         shift 1
         exec pacman-color -Ql $*
         ;;
+    w)
+        [ $# -gt 1 ] || arg_error $1
+        shift 1
+        exec pacman -Ql $* | awk 'BEGIN{ path = ENVIRON["PATH"]; gsub(/:/, "|", path); path = "^(" path ").*[^/]$"; } ($2 ~ path) {print $2}'
+        ;;
     o)
         [ $# -gt 1 ] || arg_error $1
         shift 1
