@@ -1,102 +1,311 @@
 #!/bin/bash
 
-[ $(id -u) -eq 0 ] || SUDO="sudo"
+XDG_AUR_HOME=${XDG_AUR_HOME:-~/src/aur}
+BROWSER=${BROWSER:-web_browser}
+OWL_MAX_URL=${OWL_MAX_URL:-16}
+BUILD_DIR="/tmp/build.${UID}/"
+GIT_BASE='http://projects.archlinux.org/svntogit'
+export GREP_OPTIONS=""
 
-cmd_error () {
-    echo -e "\e[31;1merror:\e[37;1m '$1'\e[0m" is not a valid command.
-    exit 1
-}
-arg_error () {
-    echo -e "\e[31;1merror:\e[37;1m '$1'\e[0m" requires an argument.
-    exit 1
+if which pacman-color >/dev/null; then
+    PACMAN=pacman-color
+else
+    PACMAN=pacman
+fi
+
+usage() {
+    cat <<- END
+SYNOPSIS
+    $(basename "$0") <action> [arguments]
+
+ACTIONS
+    update
+        Update package list and upgrade all packages afterwards.
+
+    add PKG ...
+        Install the given packages.
+
+    remove PKG ...
+        Remove the given packages.
+
+    download PKG ...
+        Download the given packages from the AUR.
+
+    info PKG ...
+        Retreive informations on the given packages.
+
+    page PKG ...
+        Opens the given packages AUR pages.
+
+    home PKG ...
+        Opens the given packages home pages.
+
+    find STRING
+        Search for packages matching STRING in the sync databases.
+
+    search STRING
+        Search for packages matching STRING in the AUR.
+
+    query STRING
+        Search locally for packages matching STRING.
+
+    list PKG ...
+        List all the files owned by the given packages.
+
+    bin PKG ...
+        Restrict the output of 'list' to executable files.
+
+    etc PKG ...
+        Restrict the output of 'list' to configuration files
+
+    man PKG ...
+        Restrict the output of 'list' to manual files.
+
+    grep STRING PKG ...
+        Search for STRING in all the files belonging to the given packages.
+
+    owner FILE
+        Return the name of the package owning the given file.
+
+    leftovers
+        Search and propose merges for 'pac{new,orig,save}' files.
+
+    foreigns
+        Show installed packages not found in the sync databases.
+
+    orphans
+        Show packages not listed as a dependency by any package.
+END
+exit 1
 }
 
-case $1 in
-    u)
-        exec packer -Syu -Syu
-        exit 0
+if [ $# -lt 1 ]; then
+    usage
+fi
+
+action=$1
+shift
+tmp_out=/tmp/owl.$$
+
+getinfos() {
+    while [ $# -gt 0 ]; do
+        $PACMAN -Si "$1" 2>/dev/null
+        if [ $? -ne 0 ]; then
+            cower -i "$1" 2> /dev/null
+            if [ $? -ne 0 ]; then
+                echo "package '$1' was not found" >&2
+                exit 1
+            fi
+        fi
+        shift
+    done
+}
+
+case $action in
+    u|U|update)
+        sudo $PACMAN -Syu
+        if [ "$action" = "u" ]; then
+            [[ -d "$BUILD_DIR" ]] || mkdir "$BUILD_DIR"
+            cd "$BUILD_DIR"
+            cower -t "$BUILD_DIR" -uddf | tee "$tmp_out"
+            if [ -s "$tmp_out" ]; then
+                list_of_programs=$(tac "$tmp_out" | sed 's/.* \([^ ]\+\) downloaded.*/\1/') 
+                for pkg in $list_of_programs; do
+                    cd "$BUILD_DIR/$pkg"
+                    if $PACMAN -Qqe $pkg >/dev/null 2>&1; then
+                        isdep=0
+                    else
+                        isdep=1
+                    fi
+
+                    makepkg -sir --pkg $pkg || exit 1
+
+                    if [[ $isdep -eq 1 ]]; then
+                        sudo $PACMAN -D --asdeps $pkg
+                    fi
+                done
+                echo -n > "$tmp_out"
+            else
+                echo "Aur up to date." >&2
+            fi
+        fi
         ;;
-    c)
-        $SUDO pacman-color -Sc --noconfirm
-        $SUDO pacman-optimize
-        $SUDO localepurge
-        exit 0
+    i|info)
+        getinfos "$@"
         ;;
-    lost)
-        exec pacman-color -Qdt
-        exit 0
+    l|L|list)
+        pattern='.'
+        if [ "$action" = "L" ]; then
+            pattern=$1
+            shift
+        fi
+        $PACMAN -Qlq "$@" | grep -i "$pattern"
         ;;
-    -*)
-        exec $SUDO pacman-color $*
-        exit 0
+    q|query)
+        $PACMAN -Qsq "$@"
         ;;
-    i)
-        [ $# -gt 1 ] || arg_error $1
-        shift 1
-        exec packer -S $*
+    f|F|find)
+        $PACMAN -Ssq "$@"
+        [ $? -ne 0 -a "$action" = "F" ] && cower -sq "$@"
         ;;
-    li)
-        [ $# -gt 1 ] || arg_error $1
-        shift 1
-        exec $SUDO pacman-color -U $*
+    s|S|search)
+        [ "$action" = "s" ] && $PACMAN -Ss "$@"
+        cower -s "$@"
         ;;
-    r)
-        [ $# -gt 1 ] || arg_error $1
-        shift 1
-        exec $SUDO pacman-color -Rsn $*
+    o|owner)
+        $PACMAN -Qo "$@"
         ;;
-    x)
-        [ $# -gt 1 ] || arg_error $1
-        shift 1
-        exec packer -Si $*
+    g|grep)
+        pattern=$1
+        shift
+        pkg_files=$($PACMAN -Qlq "$@")
+        if [ $? -eq 0 ]; then
+            [ ! "$pattern" = "\n" ] && grep -Ii "$pattern" $pkg_files
+        fi
         ;;
-    lx)
-        [ $# -gt 1 ] || arg_error $1
-        shift 1
-        exec pacman-color -Qi $*
+    d|dd|download)
+        [[ "$action" == "download" ]] && action="d"
+
+        cd "$XDG_AUR_HOME"
+        for PKG in $@; do
+            if $PACMAN -Siq $PKG >/dev/null 2>&1; then
+                for REPO in "packages.git/plain" "community.git/plain"; do
+                    URL="$GIT_BASE/$REPO/$PKG/trunk/"
+                    if wget -m -e robots=off -R index.html -q -nH -np -nd -P "$PKG" "$URL"; then
+                        echo "[1;34m::[0m $PKG downloaded to $XDG_AUR_HOME"
+                        continue 2
+                    fi
+                done
+            else
+                cower -${action}f $PKG
+            fi
+        done
         ;;
-    l)
-        [ $# -gt 1 ] || arg_error $1
-        shift 1
-        exec pacman-color -Ql $*
+    r|R|remove)
+        if [ "$action" = "r" ]; then
+            sudo $PACMAN -Rsn "$@"
+        else
+            sudo $PACMAN -R "$@"
+        fi
         ;;
-    w)
-        [ $# -gt 1 ] || arg_error $1
-        shift 1
-        exec pacman -Ql $* | awk 'BEGIN{ path = ENVIRON["PATH"]; gsub(/:/, "|", path); path = "^(" path ").*[^/]$"; } ($2 ~ path) {print $2}'
+    a|add)
+        while [ $# -gt 0 ]; do
+            if $PACMAN -Si "$1" > /dev/null 2>&1; then
+                sudo $PACMAN -S "$1" || exit 1
+            else
+                [[ -d "$BUILD_DIR" ]] || mkdir "$BUILD_DIR"
+                cd "$BUILD_DIR"
+                cower -t "$BUILD_DIR" -ddf "$1" > "$tmp_out" 2> /dev/null
+                if [ -s "$tmp_out" ]; then
+                    list_of_programs=$(tac "$tmp_out" | sed 's/.* \([^ ]\+\) downloaded.*/\1/') 
+                    for pkg in $list_of_programs; do
+                        cd "$BUILD_DIR/$pkg"
+                        if [[ "$pkg" == "$1" ]] || $PACMAN -Qqe $pkg >/dev/null 2>&1; then
+                            isdep=0
+                        else
+                            isdep=1
+                        fi
+
+                        makepkg -sir --pkg $pkg || exit 1
+
+                        if [[ $isdep -eq 1 ]]; then
+                            sudo $PACMAN -D --asdeps $pkg
+                        fi
+                    done
+                    echo -n > "$tmp_out"
+                else
+                    echo "package '$1' was not found" >&2
+                fi
+            fi
+            shift
+        done
         ;;
-    o)
-        [ $# -gt 1 ] || arg_error $1
-        shift 1
-        exec pacman-color -Qo $*
+    leftovers)
+        log_lo=$(grep -Eo '/[[:graph:]]+\.pac(new|orig|save)' /var/log/pacman.log | sort -u)
+        for i in $log_lo
+        do
+            if [ -e "$i" ]; then
+                echo "merge '$i' [y/N]?"
+                read merge_leftover
+                case "$merge_leftover" in
+                    y|yes|Y|Yes)
+                        vimdiff "${i%.*}" "$i"
+                        ;;
+                esac
+                echo "remove '$i' [y/N]?"
+                read remove_leftover
+                case "$remove_leftover" in
+                    y|yes|Y|Yes)
+                        sudo rm "$i"
+                        ;;
+                esac
+            fi
+        done
         ;;
-    s)
-        [ $# -gt 1 ] || arg_error $1
-        shift 1
-        exec packer -Ss $*
+    p|page)
+        while [ $# -gt 0 ]; do
+            uri=$(getinfos "$1" | grep -m 1 -o 'https://aur.*')
+            if [ -n "$uri" ]; then
+                $BROWSER $uri > /dev/null 2>&1
+            else
+                echo "package '$1' is not in AUR" >&2
+            fi
+            shift
+        done
         ;;
-    ls)
-        [ $# -gt 1 ] || arg_error $1
-        shift 1
-        exec pacman-color -Qs $*
+    h|H|home)
+        if [ $action = "H" ]; then
+            pkg_list=$($PACMAN -Ssq "$@"; cower -sq "$@") 
+            if [ -n "$pkg_list" ]; then
+                set $pkg_list
+            fi
+        fi
+        counter=0
+        while [ $# -gt 0 ]; do
+            uri=$(getinfos "$1" | grep -m 1 -o 'https\?://.*')
+            if [ -n "$uri" ]; then
+                echo "$1: $uri"
+                $BROWSER $uri > /dev/null 2>&1
+                counter=$((counter+1))
+            fi
+            shift
+            if [ $((counter % OWL_MAX_URL)) -eq 0 -a $counter -gt 0 -a $# -gt 0 ]; then
+                echo -n "continue [Y/n] ($# remaining)?"
+                read answer
+                [ -z "$answer" ] && answer='y'
+
+                case "$answer" in
+                    y|Y|yes|Yes)
+                        :
+                        ;;
+                    n|N|no|No)
+                        exit 0
+                        ;;
+                    *)
+                        echo "see you soon" >&2
+                        exit 1
+                        ;;
+                esac
+            fi
+        done
         ;;
-    src)
-        [ $# -gt 1 ] || arg_error $1
-        shift 1
-        exec pbget --aur $*
+    b|bin)
+        $PACMAN -Qlq "$@" | grep '/s\?bin/.'
         ;;
-    g)
-        [ $# -gt 1 ] || arg_error $1
-        shift 1
-        exec pacman-color -Qg $*
+    e|etc)
+        $PACMAN -Qlq "$@" | grep '/etc/.'
         ;;
-    .)
-        [ $# -gt 1 ] || arg_error $1
-        shift 1
-        exec $SUDO pacman-color $*
+    m|man)
+        $PACMAN -Qlq "$@" | grep '/man./.'
+        ;;
+    foreigns)
+        $PACMAN -Qmq
+        ;;
+    orphans)
+        $PACMAN -Qdtq
         ;;
     *)
-        cmd_error $1
+        echo "action '$action' is unknown" >&2
+        exit 1
         ;;
 esac
-
