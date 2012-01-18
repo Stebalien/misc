@@ -21,6 +21,7 @@ END {
         CMD=CMD" --output "screen" --mode "on_screens[screen]" --left-of "PREV
         PREV=screen
     }
+    CMD=CMD" --primary"
     for (screen in off_screens) {
         CMD=CMD" --output "screen" --off"
     }
