@@ -1,5 +1,7 @@
 #!/bin/sh
-xrandr -q | awk 'BEGIN {
+export DISPLAY=${DISPLAY:-:0}
+
+xrandr -display $DISPLAY -q | awk 'BEGIN {
 }
 
 ($2 == "connected"){
@@ -13,12 +15,12 @@ xrandr -q | awk 'BEGIN {
 }
 
 END {
-    CMD="xrandr"
+    CMD="xrandr -display "ENVIRON["DISPLAY"]
     CMD=CMD" --output LVDS1 --mode "on_screens["LVDS1"]
     delete on_screens["LVDS1"]
     PREV="LVDS1"
     for (screen in on_screens) {
-        CMD=CMD" --output "screen" --mode "on_screens[screen]" --left-of "PREV
+        CMD=CMD" --output "screen" --mode "on_screens[screen]" --right-of "PREV
         PREV=screen
     }
     CMD=CMD" --primary"
