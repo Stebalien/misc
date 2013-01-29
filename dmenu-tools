@@ -1,13 +1,8 @@
 #!/bin/zsh
-export nb="#111111"
-export nf="#aaaaaa"
-export sf="#afd700"
-export sb="#222222"
 
-DMENU_OPTIONS=(-b -i -nb $nb -nf $nf -sf $sf -sb $sb)
 case $1 in
     run)
-        dmenu_run $DMENU_OPTIONS -l 10
+        dmenu_run -b
         ;;
     moc)
         moc_parse() {
@@ -40,25 +35,48 @@ END {
         exec mocp -l "$file"
     ;;
     mpd)
-        exec mpc play $(sed -n "s@^ *\([0-9]\+\);$(mpc playlist|dmenu $DMENU_OPTIONS -l 10 -p 'song name'||echo ";;;")@\1@p" < <(mpc playlist|nl -s ';'))
+        exec mpc play $(sed -n "s@^ *\([0-9]\+\);$(mpc playlist|dmenu -b -i -l 10 -p 'song name'||echo ";;;")@\1@p" < <(mpc playlist|nl -s ';'))
         ;;
     launch)
-        DMENU_OPTIONS="${DMENU_OPTIONS[*]} -l 10"
-        export DMENU_OPTIONS
         exec dmenu-launch
         ;;
+    power)
+        case $(dmenu -b -i -p "Power:" -l 5 <<-EOF
+Shutdown
+Restart
+Logout
+Suspend
+Lock
+EOF) in
+            Shutdown)
+                exec systemctl poweroff;;
+            Restart)
+                exec systemctl reboot;;
+            Logout)
+                exec systemctl --user exit;;
+            Suspend)
+                exec systemctl suspend;;
+            Lock)
+                exec systemctl --user start lock.target;;
+        esac
+        ;;
     run-awesome)
+        XDG_CACHE_HOME=${XDG_CACHE_HOME:-"$HOME/.cache"}
         if ! test -d "$XDG_CACHE_HOME/awesome"; then
             mkdir -p "$XDG_CACHE_HOME/awesome"
-            touch "$XDG_CACHE_HOME/awesome/history"
         fi
-        CACHE=${XDG_CACHE_HOME:-"$HOME/.cache"}/dmenu_run
-        if test "`ls -dt $path "$CACHE" 2> /dev/null | sed 1q`" != "$CACHE"; then
-            mkdir -p "`dirname "$CACHE"`" && lsx $path| sort -ur > "$CACHE"
+        HISTORY=$XDG_CACHE_HOME/awesome/history
+        CACHE=$XDG_CACHE_HOME/dmenu_cache
+
+        [[ -e $HISTORY ]] || touch $HISTORY
+        [[ -e $CACHE ]] || touch $CACHE
+
+        if stest -dqr -n "$CACHE" $path; then
+            stest -flx $path | sort -ur > "$CACHE"
         fi
-        cmd=$(tac $XDG_CACHE_HOME/awesome/history "$CACHE" | dmenu $DMENU_OPTIONS)
+        cmd=$(tac $HISTORY $CACHE | dmenu -b -i)
         [[ -z "$cmd" ]] && exit
-        echo $cmd >> "$XDG_CACHE_HOME/awesome/history"
+        echo $cmd >> "$HISTORY"
         exec eval $cmd
         ;;
 esac
