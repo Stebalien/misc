@@ -21,6 +21,6 @@ done;
 
 CHOICES="${CHOICES##\!}"
 
-IFS="|" OUTPUT=($(yad --center --text "Add reminders to calendar:\n\n$(remind -t $TMPFILE|sed -e '1d' -e '/^$/d')" --form --field="Calendar:CBE" "$CHOICES"))
+IFS="|" OUTPUT=($(yad --center --text "Add reminders to calendar:\n\n$(remind -t $TMPFILE|sed -e '1d' -e '/^$/d' -e 's/&/&amp;/g' -e 's/</&lt;/g' -e 's/>/&gt;/g' | fold -s)" --form --field="Calendar:CBE" "$CHOICES"))
 
 [[ $? -eq 0 ]] && <$TMPFILE>>~/.reminders/${OUTPUT[1]}.rem
