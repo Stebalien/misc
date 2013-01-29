@@ -1,13 +1,14 @@
-#!/bin/bash
+#!/bin/zsh
 
 XDG_AUR_HOME=${XDG_AUR_HOME:-~/src/aur}
 BROWSER=${BROWSER:-web_browser}
 OWL_MAX_URL=${OWL_MAX_URL:-16}
 BUILD_DIR="/tmp/build.${UID}/"
 GIT_BASE='http://projects.archlinux.org/svntogit'
+EDITOR=${EDITOR:-vim}
 export GREP_OPTIONS=""
 
-if which pacman-color >/dev/null; then
+if which pacman-color >/dev/null 2>&1; then
     PACMAN=pacman-color
 else
     PACMAN=pacman
@@ -89,64 +90,67 @@ tmp_out=/tmp/owl.$$
 
 getinfos() {
     while [ $# -gt 0 ]; do
-        $PACMAN -Si "$1" 2>/dev/null
-        if [ $? -ne 0 ]; then
-            cower -i "$1" 2> /dev/null
-            if [ $? -ne 0 ]; then
-                echo "package '$1' was not found" >&2
-                exit 1
-            fi
-        fi
+        $PACMAN -Qi "$1" 2>/dev/null \
+            || $PACMAN -Si "$1" 2>/dev/null \
+            || cower -i "$1" 2> /dev/null \
+            || { echo "package '$1' was not found" >&2; exit 1 }
         shift
     done
 }
 
+ask() {
+    read -q "?[1;33m==> $* [y/N] [0m"
+    local ret=$?
+    echo ""
+    return $ret
+}
+    
+
 case $action in
     u|U|update)
         sudo $PACMAN -Syu
-        if [ "$action" = "u" ]; then
-            [[ -d "$BUILD_DIR" ]] || mkdir "$BUILD_DIR"
-            cd "$BUILD_DIR"
-            cower -t "$BUILD_DIR" -uddf | tee "$tmp_out"
-            if [ -s "$tmp_out" ]; then
-                list_of_programs=$(tac "$tmp_out" | sed 's/.* \([^ ]\+\) downloaded.*/\1/') 
-                for pkg in $list_of_programs; do
+        [[ -d "$BUILD_DIR" ]] || mkdir "$BUILD_DIR"
+        cd "$BUILD_DIR"
+        cower -t "$BUILD_DIR" -uddf | tee "$tmp_out"
+        if [[ -s "$tmp_out" ]]; then
+            list_of_programs=($(tac "$tmp_out" | sed 's/.* \([^ ]\+\) downloaded.*/\1/'))
+            for pkg in $list_of_programs; do
+                while ask "Edit PKGBUILD for '$pkg'?"; do
                     cd "$BUILD_DIR/$pkg"
-                    if $PACMAN -Qqe $pkg >/dev/null 2>&1; then
-                        isdep=0
-                    else
-                        isdep=1
-                    fi
-
-                    makepkg -sir --pkg $pkg || exit 1
-
-                    if [[ $isdep -eq 1 ]]; then
-                        sudo $PACMAN -D --asdeps $pkg
-                    fi
+                    $EDITOR PKGBUILD
                 done
-                echo -n > "$tmp_out"
-            else
-                echo "Aur up to date." >&2
-            fi
+            done
+            for pkg in $list_of_programs; do
+                cd "$BUILD_DIR/$pkg"
+                if $PACMAN -Qqe $pkg >/dev/null 2>&1; then
+                    isdep=0
+                else
+                    isdep=1
+                fi
+
+                makepkg -sir --pkg $pkg || exit 1
+
+                if [[ $isdep -eq 1 ]]; then
+                    sudo $PACMAN -D --asdeps $pkg
+                fi
+            done
+            echo -n > "$tmp_out"
+        else
+            echo "Aur up to date." >&2
         fi
         ;;
     i|info)
         getinfos "$@"
         ;;
-    l|L|list)
-        pattern='.'
-        if [ "$action" = "L" ]; then
-            pattern=$1
-            shift
-        fi
-        $PACMAN -Qlq "$@" | grep -i "$pattern"
+    l|list)
+        for pkg in "$@"; do
+            $PACMAN -Qlq "$pkg" 2>/dev/null \
+                || pkgfile -ql "$pkg" \
+                || echo "[1;31merror: [39mpackage '$pkg' was not found[0m"
+        done
         ;;
     q|query)
         $PACMAN -Qsq "$@"
-        ;;
-    f|F|find)
-        $PACMAN -Ssq "$@"
-        [ $? -ne 0 -a "$action" = "F" ] && cower -sq "$@"
         ;;
     s|S|search)
         [ "$action" = "s" ] && $PACMAN -Ss "$@"
@@ -189,36 +193,48 @@ case $action in
         fi
         ;;
     a|add)
-        while [ $# -gt 0 ]; do
-            if $PACMAN -Si "$1" > /dev/null 2>&1; then
-                sudo $PACMAN -S "$1" || exit 1
+        pkg_pac=()
+        pkg_aur=()
+        for pkg in ${@}; do
+            if $PACMAN -Si "$pkg" > /dev/null 2>&1; then
+                pkg_pac+="$pkg"
             else
-                [[ -d "$BUILD_DIR" ]] || mkdir "$BUILD_DIR"
-                cd "$BUILD_DIR"
-                cower -t "$BUILD_DIR" -ddf "$1" > "$tmp_out" 2> /dev/null
-                if [ -s "$tmp_out" ]; then
-                    list_of_programs=$(tac "$tmp_out" | sed 's/.* \([^ ]\+\) downloaded.*/\1/') 
-                    for pkg in $list_of_programs; do
-                        cd "$BUILD_DIR/$pkg"
-                        if [[ "$pkg" == "$1" ]] || $PACMAN -Qqe $pkg >/dev/null 2>&1; then
-                            isdep=0
-                        else
-                            isdep=1
-                        fi
-
-                        makepkg -sir --pkg $pkg || exit 1
-
-                        if [[ $isdep -eq 1 ]]; then
-                            sudo $PACMAN -D --asdeps $pkg
-                        fi
-                    done
-                    echo -n > "$tmp_out"
-                else
-                    echo "package '$1' was not found" >&2
-                fi
+                pkg_aur+="$pkg"
             fi
-            shift
         done
+        if [[ ${#pkg_pac} -gt 0 ]]; then
+            sudo $PACMAN -S ${pkg_pac[@]} || exit 1
+        fi
+        if [[ ${#pkg_aur} -gt 0 ]]; then
+            [[ -d "$BUILD_DIR" ]] || mkdir "$BUILD_DIR"
+            cd "$BUILD_DIR"
+            cower -t "$BUILD_DIR" -ddf ${pkg_aur[@]} > "$tmp_out" 2> /dev/null
+            if [ -s "$tmp_out" ]; then
+                list_of_programs=($(tac "$tmp_out" | sed 's/.* \([^ ]\+\) downloaded.*/\1/'))
+                deps=()
+                for pkg in $list_of_programs; do
+                    while ask "Edit PKGBUILD for '$pkg'?"; do
+                        cd "$BUILD_DIR/$pkg"
+                        $EDITOR PKGBUILD
+                    done
+                done
+                for pkg in ${list_of_programs[@]}; do
+                    cd "$BUILD_DIR/$pkg"
+                    if [[ ${pkg_aur[(I)${pkg}]} -eq 0 ]] && ! $PACMAN -Qqe $pkg >/dev/null 2>&1; then
+                        deps+="$pkg"
+                    fi
+
+                    makepkg -sir --pkg "$pkg" || exit 1
+
+                done
+                if [[ ${#deps} -gt 0 ]]; then
+                    sudo $PACMAN -D --asdeps "${deps[@]}"
+                fi
+                echo -n > "$tmp_out"
+            else
+                echo "package '$1' was not found" >&2
+            fi
+        fi
         ;;
     leftovers)
         log_lo=$(grep -Eo '/[[:graph:]]+\.pac(new|orig|save)' /var/log/pacman.log | sort -u)
