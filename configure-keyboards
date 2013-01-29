@@ -1,0 +1,5 @@
+#!/bin/sh
+export DISPLAY=${DISPLAY:-:0}
+
+numlockx &
+xset r rate 250 25 &
