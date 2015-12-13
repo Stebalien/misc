@@ -19,21 +19,19 @@ from pithos.pithosconfig import get_data_file
 from mutagen.mp4 import MP4
 import os
 from shutil import copyfile as copy
-from glob import glob
+import urllib
+import eyed3
+import eyed3.id3
 
 class SavePlugin(PithosPlugin):
     preference = 'save'
-    _MUSIC_DIR = os.getenv("XDG_MUSIC_DIR")
+    _MUSIC_DIR = os.getenv("XDG_MUSIC_DIR") or os.path.expanduser("~/Music")
 
     def on_enable(self):
         self.song_rating_changed_handle = self.window.connect('song-rating-changed', self.song_rating_changed)
-        
+
     def song_rating_changed(self, window,  song):
         if song.rating and song.rating_str == 'love':
-            tmp_files = glob("/tmp/pithos-??????")
-            if not tmp_files:
-                return
-            src_file = tmp_files[-1]
             path = os.path.join(SavePlugin._MUSIC_DIR, song.artist, song.album)
             filename = "%s.m4a" % song.title
             fullpath = os.path.join(path, filename)
@@ -41,13 +39,25 @@ class SavePlugin(PithosPlugin):
                 return
             if not os.path.isdir(path):
                 os.makedirs(path)
-            copy(src_file, fullpath)
-            mp4file = MP4(fullpath)
-            mp4file["\xa9nam"] = unicode(song.title)
-            mp4file["\xc2\xa9na"] = unicode(song.title)
-            mp4file["\xa9ART"] = unicode(song.artist)
-            mp4file["\xa9alb"] = unicode(song.album)
-            mp4file.save()
+            fetch = urllib.URLopener()
+            fetch.retrieve(song.audioUrl, fullpath)
+
+            try:
+                mp4file = MP4(fullpath)
+                mp4file["\xa9nam"] = unicode(song.title)
+                mp4file["\xc2\xa9na"] = unicode(song.title)
+                mp4file["\xa9ART"] = unicode(song.artist)
+                mp4file["\xa9alb"] = unicode(song.album)
+                mp4file.save()
+            except:
+                audiofile = eyed3.load(fullpath)
+                if audiofile.tag is None:
+                    audiofile.tag = eyed3.id3.Tag()
+                    audiofile.tag.file_info = eyed3.id3.FileInfo(fullpath)           
+                audiofile.tag.artist = u"" + song.artist
+                audiofile.tag.album = u"" + song.album
+                audiofile.tag.title = u"" + song.title
+                audiofile.tag.save()
             
     def on_disable(self):
         self.window.disconnect(self.song_rating_changed_handle)
