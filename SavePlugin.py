@@ -46,10 +46,10 @@ class SavePlugin(PithosPlugin):
                 out_file.write(data)
             try:
                 mp4file = MP4(fullpath)
-                mp4file["\xa9nam"] = str(song.titlei, 'utf-8')
-                mp4file["\xc2\xa9na"] = str(song.title, 'utf-8')
-                mp4file["\xa9ART"] = str(song.artist, 'utf-8')
-                mp4file["\xa9alb"] = str(song.album, 'utf-8')
+                mp4file["\xa9nam"] = song.title
+                mp4file["\xc2\xa9na"] = song.title
+                mp4file["\xa9ART"] = song.artist
+                mp4file["\xa9alb"] = song.album
                 mp4file.save()
             except:
                 audiofile = eyed3.load(fullpath)
